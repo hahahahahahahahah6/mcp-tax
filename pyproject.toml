@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-tax"
+version = "0.1.0"
+description = "Audit the context tax of your MCP servers; toggle them off per session"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "hao li"}]
+keywords = ["mcp", "claude-code", "context-window", "developer-tools", "cli"]
+
+[project.scripts]
+mcp-tax = "mcp_tax.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/hahahahahahahahah6/mcp-tax"
+
+[tool.setuptools.packages.find]
+include = ["mcp_tax*"]
