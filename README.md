@@ -16,9 +16,9 @@ Zero dependencies. Python standard library only.
 ## Install
 
 ```bash
-pip install git+https://github.com/hahahahahahahahah6/mcp-tax.git
+pip install mcp-tax
 # or with pipx:
-pipx install git+https://github.com/hahahahahahahahah6/mcp-tax.git
+pipx install mcp-tax
 ```
 
 Requires Python 3.9+. No other packages.
