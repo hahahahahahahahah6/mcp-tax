@@ -51,8 +51,19 @@ def main():
         elif method == "notifications/initialized":
             continue
         elif method == "tools/list":
-            resp = {"jsonrpc": "2.0", "id": req_id,
-                    "result": {"tools": TOOLS}}
+            if os.environ.get("FAKE_PAGES") == "1":
+                cursor = (req.get("params") or {}).get("cursor")
+                if cursor is None:
+                    page, nxt = [TOOLS[0]], "page2"
+                else:
+                    page, nxt = [TOOLS[1]], None
+                result = {"tools": page}
+                if nxt:
+                    result["nextCursor"] = nxt
+                resp = {"jsonrpc": "2.0", "id": req_id, "result": result}
+            else:
+                resp = {"jsonrpc": "2.0", "id": req_id,
+                        "result": {"tools": TOOLS}}
         else:
             resp = {"jsonrpc": "2.0", "id": req_id,
                     "error": {"code": -32601, "message": "unknown"}}

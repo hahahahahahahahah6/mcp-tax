@@ -117,18 +117,28 @@ def audit_server(name, spec, timeout=DEFAULT_TIMEOUT):
                              % (init_resp["error"] or {}).get("message", "?"))
 
         _send(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})
-        _send(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list",
-                     "params": {}})
-        list_resp = _read_response(proc, 2, deadline)
-        if list_resp is None:
-            raise AuditError("no tools/list response within %ss" % timeout)
-        if list_resp.get("error"):
-            raise AuditError("tools/list error: %s"
-                             % (list_resp["error"] or {}).get("message", "?"))
+        tools = []
+        cursor = None
+        req_id = 2
+        while True:
+            params = {} if cursor is None else {"cursor": cursor}
+            _send(proc, {"jsonrpc": "2.0", "id": req_id, "method": "tools/list",
+                         "params": params})
+            list_resp = _read_response(proc, req_id, deadline)
+            if list_resp is None:
+                raise AuditError("no tools/list response within %ss" % timeout)
+            if list_resp.get("error"):
+                raise AuditError("tools/list error: %s"
+                                 % (list_resp["error"] or {}).get("message", "?"))
+            page = (list_resp.get("result") or {}).get("tools") or []
+            if not isinstance(page, list):
+                raise AuditError("tools/list returned non-list tools")
+            tools.extend(page)
+            cursor = (list_resp.get("result") or {}).get("nextCursor")
+            if not cursor:
+                break
+            req_id += 1
 
-        tools = (list_resp.get("result") or {}).get("tools") or []
-        if not isinstance(tools, list):
-            raise AuditError("tools/list returned non-list tools")
         schema = json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
         schema_chars = len(schema)
         return {

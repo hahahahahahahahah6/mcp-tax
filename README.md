@@ -92,10 +92,13 @@ my window?", not a billing meter.
 
 - **stdio servers only.** Servers using SSE or streamable HTTP transports are
   not audited (they'd show a connection failure row).
-- **The `--mcp-config` flag** for `run` comes from Claude Code's documented CLI
-  options; it could not be verified on the machine where this was built (no
-  Claude Code CLI installed). If the flag name ever changes, `run` prints the
-  filtered config path so you can pass it manually.
+- **The `--mcp-config` / `--strict-mcp-config` flags** for `run` come from Claude
+  Code's documented CLI options; they could not be verified on the machine
+  where this was built (no Claude Code CLI installed). `--strict-mcp-config`
+  matters: `--mcp-config` alone only *adds* servers on top of your configured
+  ones, so without the strict flag disabled servers would still load. If the
+  flag names ever change, `run` prints the filtered config path so you can
+  pass it manually.
 - **Audit uses `select(2)`** on the server's stdout pipe: fine on Linux/macOS,
   not on Windows.
 - The estimate ignores tools' runtime behavior — a server with 2 tools can

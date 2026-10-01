@@ -45,6 +45,13 @@ def test_audit_skips_stdout_noise():
     print("audit_noise ok")
 
 
+def test_audit_follows_next_cursor():
+    """tools/list pagination: both pages must be counted."""
+    res = client.audit_server("paged", _spec(("FAKE_PAGES", "1")), timeout=10)
+    assert res["tool_count"] == 2, res
+    print("audit_pagination ok")
+
+
 def test_audit_timeout():
     try:
         client.audit_server("hang", _spec(("FAKE_HANG", "1")), timeout=2)
@@ -85,10 +92,7 @@ def test_on_off_filtering(tmp_path):
 
 
 def test_config_merge(tmp_path):
-    base = tmp_path._base if tmp_path is not None else None
-    if base is None:
-        import tempfile
-        base = tempfile.mkdtemp()
+    base = getattr(tmp_path, "_base", None) or str(tmp_path)
     g = os.path.join(base, "claude.json")
     p = os.path.join(base, "mcp.json")
     with open(g, "w") as f:
@@ -112,8 +116,8 @@ def test_run_prepare(tmp_path):
     servers = {"a": {"command": "ca", "args": ["--x"]},
                "b": {"command": "cb"}}
     path, argv = runner.prepare(servers, {"b"}, ["-p", "hello"], state=state)
-    assert argv[:3] == ["claude", "--mcp-config", path], argv
-    assert argv[3:] == ["-p", "hello"], argv
+    assert argv[:4] == ["claude", "--mcp-config", path, "--strict-mcp-config"], argv
+    assert argv[4:] == ["-p", "hello"], argv
     with open(path) as f:
         data = json.load(f)
     assert set(data["mcpServers"]) == {"a"}, data
@@ -135,6 +139,7 @@ def _run_all():
     tmp = _Tmp(tempfile.mkdtemp())
     test_audit_math()
     test_audit_skips_stdout_noise()
+    test_audit_follows_next_cursor()
     test_audit_timeout()
     test_audit_missing_command()
     test_on_off_filtering(tmp)
