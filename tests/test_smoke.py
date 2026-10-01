@@ -111,6 +111,62 @@ def test_config_merge(tmp_path):
     print("config_merge ok")
 
 
+def test_local_scope_merge(tmp_path):
+    """projects.<cwd>.mcpServers (claude mcp add's default scope) is loaded,
+    and local > project > global on name clash."""
+    base = getattr(tmp_path, "_base", None) or str(tmp_path)
+    g = os.path.join(base, "claude.json")
+    p = os.path.join(base, "mcp.json")
+    projdir = os.path.join(base, "proj")
+    os.makedirs(projdir)
+    with open(g, "w") as f:
+        json.dump({
+            "mcpServers": {
+                "glob": {"command": "g"},
+                "over": {"command": "global-old"},
+            },
+            "projects": {
+                projdir: {"mcpServers": {
+                    "loc": {"command": "l"},
+                    "over": {"command": "local-new"},
+                }},
+                "/some/other/dir": {"mcpServers": {
+                    "other": {"command": "o"},
+                }},
+            },
+        }, f)
+    with open(p, "w") as f:
+        json.dump({"mcpServers": {
+            "over": {"command": "project-mid"},
+            "proj": {"command": "p"},
+        }}, f)
+    servers = config.load_servers(claude_json=g, project_json=p, cwd=projdir)
+    # local-scope server shows up
+    assert servers["loc"]["command"] == "l", servers
+    assert servers["loc"]["_source"] == "local", servers
+    # priority: local > project > global
+    assert servers["over"]["command"] == "local-new", servers
+    assert servers["over"]["_source"] == "local", servers
+    # global and project still merge as before
+    assert servers["glob"]["_source"] == "global", servers
+    assert servers["proj"]["_source"] == "project", servers
+    # a different project's local scope is ignored
+    assert "other" not in servers, servers
+    # cwd with no local entry: no crash, project still beats global
+    servers2 = config.load_servers(claude_json=g, project_json=p,
+                                   cwd=os.path.join(base, "nowhere"))
+    assert "loc" not in servers2, servers2
+    assert servers2["over"]["command"] == "project-mid", servers2
+    assert servers2["over"]["_source"] == "project", servers2
+    # malformed projects key: fail open, global still loads
+    with open(g, "w") as f:
+        json.dump({"mcpServers": {"glob": {"command": "g"}},
+                   "projects": ["not", "a", "dict"]}, f)
+    servers3 = config.load_servers(claude_json=g, project_json=p, cwd=projdir)
+    assert servers3["glob"]["command"] == "g", servers3
+    print("local_scope_merge ok")
+
+
 def test_run_prepare(tmp_path):
     state = str(tmp_path / "s")
     servers = {"a": {"command": "ca", "args": ["--x"]},
@@ -144,6 +200,7 @@ def _run_all():
     test_audit_missing_command()
     test_on_off_filtering(tmp)
     test_config_merge(tmp)
+    test_local_scope_merge(tmp)
     test_run_prepare(tmp)
     print("ALL SMOKE TESTS PASSED")
 

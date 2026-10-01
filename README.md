@@ -25,8 +25,9 @@ Requires Python 3.9+. No other packages.
 
 ## Usage
 
-**See what you have configured** (reads `~/.claude.json` plus `./.mcp.json`
-when present):
+**See what you have configured** (reads `~/.claude.json` — including the
+local project scope `projects.<cwd>.mcpServers` where `claude mcp add`
+stores servers by default — plus `./.mcp.json` when present):
 
 ```bash
 $ mcp-tax list
