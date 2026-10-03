@@ -73,8 +73,12 @@ mcp-tax: 2 server(s), 1 disabled -> ~/.config/mcp-tax/mcp-config.filtered.json
 ```
 
 This writes a filtered `{"mcpServers": ...}` config (disabled servers removed)
-and execs `claude --mcp-config <file>` with your args forwarded. Your real
-`~/.claude.json` is never modified.
+and execs `claude --mcp-config <file> --strict-mcp-config` with your args
+forwarded. The "without the disabled servers" part comes from
+`--strict-mcp-config`, which mcp-tax always passes: `--mcp-config` alone only
+*layers* the file onto MCP servers from your other config sources
+(`~/.claude.json`, `.mcp.json`), so a disabled server listed there would still
+load. Your real `~/.claude.json` is never modified.
 
 All commands also accept `--json` (`list`, `audit`) for scripting.
 
@@ -111,7 +115,7 @@ my window?", not a billing meter.
 ## Development
 
 ```bash
-python3 tests/test_smoke.py   # 7 smoke tests, incl. a fake stdio MCP server
+python3 tests/test_smoke.py   # 9 smoke tests, incl. a fake stdio MCP server
 ```
 
 The test fixture `tests/fake_mcp_server.py` speaks the same newline-delimited
