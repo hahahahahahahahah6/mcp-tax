@@ -1,7 +1,9 @@
 """Build the filtered MCP config and launch Claude Code with it.
 
 `mcp-tax run -- <claude args>` writes {"mcpServers": {...}} minus the
-disabled servers, then execs `claude --mcp-config <file>`.
+disabled servers, then execs
+`claude --mcp-config <file> --strict-mcp-config`. The strict flag is what
+actually isolates the session from the user's other MCP config sources.
 """
 
 import json
@@ -43,8 +45,11 @@ def write_filtered_config(filtered, path=None):
 def build_command(filtered_path, claude_args):
     """The exact argv that `run` will exec. Pure function, easy to test.
 
-    --strict-mcp-config is essential: --mcp-config alone only ADDS to the
-    user's configured servers, so disabled servers would still load.
+    --strict-mcp-config is always passed and is essential: Claude Code's
+    --mcp-config only LAYERS the given file onto MCP servers from the user's
+    other config sources (~/.claude.json, .mcp.json) instead of replacing
+    them, so without the strict flag disabled servers would still load.
+    (Thanks to dev.to reviewer Arhan Canli for pressing on this distinction.)
     """
     return ["claude", "--mcp-config", filtered_path,
             "--strict-mcp-config"] + list(claude_args)
