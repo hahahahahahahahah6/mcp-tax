@@ -65,7 +65,8 @@ $ mcp-tax on postgres
 postgres enabled (affects `mcp-tax run`)
 ```
 
-**Launch Claude Code without the disabled servers:**
+**Launch Claude Code with the filtered config layered onto your existing MCP
+configuration:**
 
 ```bash
 $ mcp-tax run -- -p "summarize this repo"
@@ -73,8 +74,20 @@ mcp-tax: 2 server(s), 1 disabled -> ~/.config/mcp-tax/mcp-config.filtered.json
 ```
 
 This writes a filtered `{"mcpServers": ...}` config (disabled servers removed)
-and execs `claude --mcp-config <file>` with your args forwarded. Your real
-`~/.claude.json` is never modified.
+and execs `claude --mcp-config <file>` with your args forwarded. Claude Code's
+`--mcp-config` adds this file to MCP servers from other configuration sources;
+it does **not** isolate the session, so a disabled server found in
+`~/.claude.json` or `.mcp.json` may still load.
+
+To use only the filtered file and exclude MCP servers from every other config
+source, opt into strict mode:
+
+```bash
+$ mcp-tax run --strict -- -p "summarize this repo"
+```
+
+This adds Claude Code's `--strict-mcp-config` flag. Neither mode modifies your
+real `~/.claude.json`.
 
 All commands also accept `--json` (`list`, `audit`) for scripting.
 
@@ -97,7 +110,7 @@ my window?", not a billing meter.
   Code's documented CLI options; they could not be verified on the machine
   where this was built (no Claude Code CLI installed). `--strict-mcp-config`
   matters: `--mcp-config` alone only *adds* servers on top of your configured
-  ones, so without the strict flag disabled servers would still load. If the
+  ones, so without `mcp-tax run --strict` disabled servers can still load. If the
   flag names ever change, `run` prints the filtered config path so you can
   pass it manually.
 - **Audit uses `select(2)`** on the server's stdout pipe: fine on Linux/macOS,
@@ -111,7 +124,7 @@ my window?", not a billing meter.
 ## Development
 
 ```bash
-python3 tests/test_smoke.py   # 7 smoke tests, incl. a fake stdio MCP server
+python3 tests/test_smoke.py   # 11 smoke tests, incl. a fake stdio MCP server
 ```
 
 The test fixture `tests/fake_mcp_server.py` speaks the same newline-delimited

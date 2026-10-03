@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from mcp_tax import client, config, runner  # noqa: E402
+from mcp_tax import cli, client, config, runner  # noqa: E402
 
 FAKE_SERVER = os.path.join(os.path.dirname(__file__), "fake_mcp_server.py")
 PY = sys.executable
@@ -171,14 +171,33 @@ def test_run_prepare(tmp_path):
     state = str(tmp_path / "s")
     servers = {"a": {"command": "ca", "args": ["--x"]},
                "b": {"command": "cb"}}
-    path, argv = runner.prepare(servers, {"b"}, ["-p", "hello"], state=state)
-    assert argv[:4] == ["claude", "--mcp-config", path, "--strict-mcp-config"], argv
+    path, argv = runner.prepare(servers, {"b"}, ["-p", "hello"], state=state,
+                                strict=True)
+    assert argv[:4] == [
+        "claude", "--mcp-config", path, "--strict-mcp-config"
+    ], argv
     assert argv[4:] == ["-p", "hello"], argv
     with open(path) as f:
         data = json.load(f)
     assert set(data["mcpServers"]) == {"a"}, data
     assert data["mcpServers"]["a"]["args"] == ["--x"]
     print("run_prepare ok: %s" % runner.format_command(argv))
+
+
+def test_run_prepare_without_strict(tmp_path):
+    """Strict isolation is opt-in and must not alter forwarded arguments."""
+    state = str(tmp_path / "non-strict")
+    path, argv = runner.prepare({}, set(), ["-p", "hello"], state=state)
+    assert argv[:3] == ["claude", "--mcp-config", path], argv
+    assert argv[3:] == ["-p", "hello"], argv
+    assert "--strict-mcp-config" not in argv, argv
+
+
+def test_run_strict_cli_flag():
+    args = cli.build_parser().parse_args(
+        ["run", "--strict", "--", "-p", "hello"])
+    assert args.strict is True
+    assert args.claude_args == ["--", "-p", "hello"]
 
 
 class _Tmp:
@@ -202,6 +221,8 @@ def _run_all():
     test_config_merge(tmp)
     test_local_scope_merge(tmp)
     test_run_prepare(tmp)
+    test_run_prepare_without_strict(tmp)
+    test_run_strict_cli_flag()
     print("ALL SMOKE TESTS PASSED")
 
 

@@ -137,7 +137,8 @@ def _toggle(args, enable):
 def cmd_run(args):
     servers = config_mod.load_servers()
     disabled = config_mod.load_disabled()
-    path, argv = runner.prepare(servers, disabled, args.claude_args)
+    path, argv = runner.prepare(servers, disabled, args.claude_args,
+                                strict=args.strict)
     n_off = sum(1 for n in servers if n in disabled)
     print("mcp-tax: %d server(s), %d disabled -> %s"
           % (len(servers), n_off, path))
@@ -180,6 +181,9 @@ def build_parser():
     pr = sub.add_parser(
         "run", help="launch claude with disabled servers removed "
                     "(usage: mcp-tax run -- [claude args...])")
+    pr.add_argument(
+        "--strict", action="store_true",
+        help="isolate the filtered config with Claude's --strict-mcp-config")
     pr.add_argument("claude_args", nargs=argparse.REMAINDER,
                     help="arguments forwarded to claude")
     pr.set_defaults(func=cmd_run)

@@ -40,23 +40,21 @@ def write_filtered_config(filtered, path=None):
     return path
 
 
-def build_command(filtered_path, claude_args):
-    """The exact argv that `run` will exec. Pure function, easy to test.
-
-    --strict-mcp-config is essential: --mcp-config alone only ADDS to the
-    user's configured servers, so disabled servers would still load.
-    """
-    return ["claude", "--mcp-config", filtered_path,
-            "--strict-mcp-config"] + list(claude_args)
+def build_command(filtered_path, claude_args, strict=False):
+    """Return the exact argv that ``run`` will exec."""
+    argv = ["claude", "--mcp-config", filtered_path]
+    if strict:
+        argv.append("--strict-mcp-config")
+    return argv + list(claude_args)
 
 
-def prepare(servers, disabled, claude_args, state=None):
+def prepare(servers, disabled, claude_args, state=None, strict=False):
     """Filter, write config, return (filtered_path, argv). No side effects
     beyond writing the filtered config file."""
     filtered = build_filtered_config(servers, disabled)
     path = write_filtered_config(
         filtered, config_mod.filtered_config_path(state))
-    return path, build_command(path, claude_args)
+    return path, build_command(path, claude_args, strict=strict)
 
 
 def exec_claude(argv):
