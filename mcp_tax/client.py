@@ -40,24 +40,30 @@ def _read_response(proc, want_id, deadline):
     """Read stdout until the JSON-RPC response with want_id arrives.
 
     Skips blank lines and non-JSON noise (some servers log to stdout).
-    Returns the response dict, or None on timeout / EOF.
+    Returns (response dict, wire_bytes), or (None, wire_bytes) on
+    timeout / EOF. wire_bytes counts every byte consumed while waiting
+    for this response — including skipped noise lines, which also
+    crossed the pipe.
     """
     buf = ""
+    wire_bytes = 0
     fd = proc.stdout.fileno()
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
         ready, _, _ = select.select([fd], [], [], max(0.0, remaining))
         if not ready:
-            return None  # timeout
+            return None, wire_bytes  # timeout
         try:
             chunk = os.read(fd, 65536)
         except OSError:
-            return None
+            return None, wire_bytes
         if not chunk:
-            return None  # EOF
+            return None, wire_bytes  # EOF
         buf += chunk.decode("utf-8", errors="replace")
         while "\n" in buf:
             line, buf = buf.split("\n", 1)
+            # one wire byte per char plus the newline that terminated it
+            wire_bytes += len(line.encode("utf-8", errors="replace")) + 1
             line = line.strip()
             if not line:
                 continue
@@ -66,8 +72,8 @@ def _read_response(proc, want_id, deadline):
             except ValueError:
                 continue  # stdout noise, not a protocol message
             if isinstance(msg, dict) and msg.get("id") == want_id:
-                return msg
-    return None
+                return msg, wire_bytes
+    return None, wire_bytes
 
 
 def audit_server(name, spec, timeout=DEFAULT_TIMEOUT):
@@ -109,7 +115,7 @@ def audit_server(name, spec, timeout=DEFAULT_TIMEOUT):
                 "clientInfo": {"name": CLIENT_NAME, "version": __version__},
             },
         })
-        init_resp = _read_response(proc, 1, deadline)
+        init_resp, _init_wire = _read_response(proc, 1, deadline)
         if init_resp is None:
             raise AuditError("no initialize response within %ss" % timeout)
         if init_resp.get("error"):
@@ -118,18 +124,20 @@ def audit_server(name, spec, timeout=DEFAULT_TIMEOUT):
 
         _send(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})
         tools = []
+        wire_pages = []  # wire bytes per tools/list page, in request order
         cursor = None
         req_id = 2
         while True:
             params = {} if cursor is None else {"cursor": cursor}
             _send(proc, {"jsonrpc": "2.0", "id": req_id, "method": "tools/list",
                          "params": params})
-            list_resp = _read_response(proc, req_id, deadline)
+            list_resp, page_wire = _read_response(proc, req_id, deadline)
             if list_resp is None:
                 raise AuditError("no tools/list response within %ss" % timeout)
             if list_resp.get("error"):
                 raise AuditError("tools/list error: %s"
                                  % (list_resp["error"] or {}).get("message", "?"))
+            wire_pages.append(page_wire)
             page = (list_resp.get("result") or {}).get("tools") or []
             if not isinstance(page, list):
                 raise AuditError("tools/list returned non-list tools")
@@ -146,6 +154,11 @@ def audit_server(name, spec, timeout=DEFAULT_TIMEOUT):
             "tool_count": len(tools),
             "schema_chars": schema_chars,
             "est_tokens": estimate_tokens(schema_chars),
+            # Wire dimension: the tools/list discovery exchange, paid once
+            # per session. Distinct from the context tax, which is re-paid
+            # into the window on every turn (see mcp_tax.ledger).
+            "wire_bytes": sum(wire_pages),
+            "wire_bytes_per_page": wire_pages,
         }
     finally:
         try:

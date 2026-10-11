@@ -1,1 +1,9 @@
 __pycache__/
+# internal drafts never go to the public repo (gh-push also hard-skips
+# PLAN.md / promo-drafts.md / devto-article.md)
+PLAN.md
+promo-drafts.md
+devto-article.md
+devto-*-draft.md
+dist/
+*.egg-info/

@@ -9,6 +9,7 @@ from . import __version__
 from . import attribution
 from . import client
 from . import config as config_mod
+from . import ledger
 from . import runner
 from . import unified
 
@@ -56,6 +57,15 @@ def _fmt_row(cols, widths):
 def cmd_audit(args):
     if args.all:
         return cmd_audit_all(args)
+    turns = args.turns
+    if turns < 1:
+        print("error: --turns must be >= 1", file=sys.stderr)
+        return 2
+    cache_hit_rate = args.cache_hit_rate
+    if not 0.0 <= cache_hit_rate <= 1.0:
+        print("error: --cache-hit-rate must be in [0, 1]", file=sys.stderr)
+        return 2
+
     servers = config_mod.load_servers()
     disabled = config_mod.load_disabled()
     if not servers:
@@ -78,38 +88,65 @@ def cmd_audit(args):
                          "error": "unexpected: %s" % exc,
                          "disabled": name in disabled})
 
+    # Per-turn re-entry ledger: schemas are re-billed into the window on
+    # every turn, so the session cost is per-turn preamble x turns — not
+    # the old once-per-session number (which undercounted by turns).
+    rep = ledger.build_ledger(rows, turns, cache_hit_rate)
+    by_name = {line["name"]: line for line in rep["servers"]}
+    for r in rows:
+        if r["ok"] and r["name"] in by_name:
+            r.update(by_name[r["name"]])
+    totals = rep["totals"]
+
     if args.json:
-        print(json.dumps(rows, indent=2))
+        print(json.dumps({
+            "turns": turns,
+            "cache_hit_rate": cache_hit_rate,
+            "window_tokens": WINDOW_TOKENS,
+            "rows": rows,
+            "totals": totals,
+        }, indent=2))
         return 0 if all(r["ok"] for r in rows) else 1
 
-    ok_rows = [r for r in rows if r["ok"]]
     name_w = max([len(r["name"]) for r in rows] + [6])
-    print(_fmt_row(["server", "tools", "schema chars", "est. tokens"],
-                   [name_w, 7, 12, 11]))
-    print(_fmt_row(["-" * name_w, "-" * 7, "-" * 12, "-" * 11],
-                   [name_w, 7, 12, 11]))
+    head = ["server", "tools", "wire bytes", "preamble/turn",
+            "window toks (%d turns)" % turns]
+    widths = [name_w, 7, 10, 13, 20]
+    print(_fmt_row(head, widths))
+    print(_fmt_row(["-" * name_w, "-" * 7, "-" * 10, "-" * 13, "-" * 20],
+                   widths))
     for r in rows:
         mark = " [off]" if r["disabled"] else ""
         if r["ok"]:
             print(_fmt_row(
                 [r["name"] + mark, r["tool_count"],
-                 "{:,}".format(r["schema_chars"]),
-                 "{:,}".format(r["est_tokens"])],
-                [name_w, 7, 12, 11]))
+                 "{:,}".format(r["wire_bytes"]),
+                 "{:,}".format(r["preamble_tokens_per_turn"]),
+                 "{:,}".format(r["cumulative_window_tokens"])],
+                widths))
         else:
             print("%s%s  FAILED: %s" % (r["name"].ljust(name_w), mark, r["error"]))
 
-    total_tools = sum(r["tool_count"] for r in ok_rows)
-    total_chars = sum(r["schema_chars"] for r in ok_rows)
-    total_tokens = sum(r["est_tokens"] for r in ok_rows)
-    print(_fmt_row(["-" * name_w, "-" * 7, "-" * 12, "-" * 11],
-                   [name_w, 7, 12, 11]))
+    print(_fmt_row(["-" * name_w, "-" * 7, "-" * 10, "-" * 13, "-" * 20],
+                   widths))
     print(_fmt_row(
-        ["TOTAL", total_tools, "{:,}".format(total_chars),
-         "{:,}".format(total_tokens)],
-        [name_w, 7, 12, 11]))
-    print("~%.1f%% of a %dk context window (est. tokens = schema chars / 4)"
-          % (100.0 * total_tokens / WINDOW_TOKENS, WINDOW_TOKENS // 1000))
+        ["TOTAL", totals["tool_count"],
+         "{:,}".format(totals["wire_bytes"]),
+         "{:,}".format(totals["preamble_tokens_per_turn"]),
+         "{:,}".format(totals["cumulative_window_tokens"])],
+        widths))
+    print("~%.1f%% of a %dk context window re-entered EVERY turn "
+          "(schemas are re-injected per API call)" % (
+              100.0 * totals["preamble_tokens_per_turn"] / WINDOW_TOKENS,
+              WINDOW_TOKENS // 1000))
+    print("wire bytes are a one-time-per-session transport cost, not "
+          "context tax; est. tokens = schema chars / 4")
+    if cache_hit_rate > 0:
+        print("prompt cache (%.0f%% hit): billable ~%s tokens vs %s window "
+              "tokens — caching cuts price, never window occupancy"
+              % (100.0 * cache_hit_rate,
+                 "{:,}".format(totals["billable_tokens"]),
+                 "{:,}".format(totals["cacheable_tokens"])))
     failed = [r for r in rows if not r["ok"]]
     if failed:
         print("warning: %d server(s) failed to audit: %s"
@@ -243,6 +280,13 @@ def build_parser():
     pa.add_argument("--json", action="store_true")
     pa.add_argument("--timeout", type=float, default=client.DEFAULT_TIMEOUT,
                     help="per-server timeout in seconds (default %(default)s)")
+    pa.add_argument("--turns", type=int, default=10,
+                    help="API calls (turns) in the session: schemas re-enter "
+                         "the window every turn (default %(default)s)")
+    pa.add_argument("--cache-hit-rate", type=float, default=0.0,
+                    help="fraction of preamble tokens served from prompt "
+                         "cache, 0..1 (affects price only, never window "
+                         "occupancy; default %(default)s)")
     pa.add_argument("--all", action="store_true",
                     help="audit all four always-on context sources "
                          "(rules, memory, skills, MCP calls)")

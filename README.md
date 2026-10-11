@@ -16,6 +16,11 @@ what agent, for what project** (`who-called`), a unified audit of all four
 always-on context sources (`audit --all`), and a **CI gate** (`gate`) that
 fails your build when the budget is blown.
 
+v3 fixes the billing model itself: schemas **re-enter the window on every
+turn** (not once per session), each server is billed as an independent
+**preamble** line, and `tools/list` pagination gets its own **wire-bytes**
+counter — transport cost, not context tax.
+
 Zero dependencies. Python standard library only.
 
 ## Install
@@ -44,18 +49,25 @@ postgres  [off]
 ```
 
 **Measure the tax** — handshakes each server over stdio (`initialize`, then
-`tools/list`), counts tools, and estimates tokens:
+`tools/list`), counts tools, counts the discovery wire bytes, and estimates
+tokens:
 
 ```bash
-$ mcp-tax audit
-server    tools  schema chars  est. tokens
-------  -------  ------------  -----------
-github       51       118,203        29,551
-postgres [off]    9        12,440         3,110
-------  -------  ------------  -----------
-TOTAL        60       130,643        32,661
-~16.3% of a 200k context window (est. tokens = schema chars / 4)
+$ mcp-tax audit --turns 20
+server      tools  wire bytes  preamble/turn   window toks (20 turns)
+------    -------  ----------  -------------  --------------------
+github         51     118,320         29,551               591,020
+postgres [off]    9      12,455          3,110                62,200
+------    -------  ----------  -------------  --------------------
+TOTAL          60     130,775         32,661               653,220
+~16.3% of a 200k context window re-entered EVERY turn (schemas are re-injected per API call)
+wire bytes are a one-time-per-session transport cost, not context tax; est. tokens = schema chars / 4
 ```
+
+Key idea: the per-turn **preamble** is what binds the window, and the
+session's true cost is preamble × turns. `--turns` sets the session length
+(default 10); `--cache-hit-rate 0.5` models prompt caching (cuts price,
+never window occupancy — see "How billing works").
 
 Servers that fail (bad command, timeout, handshake error) get a `FAILED` row
 and a warning instead of killing the audit. Per-server timeout is 15s
@@ -177,16 +189,56 @@ Sibling tools, complementary axes:
 
 Cheap is not the same as safe, and safe is not the same as cheap. Run both.
 
-## How the token estimate works
+## What's new in 0.3.0
+
+Two dev.to readers pressed on the billing model until it broke — and they
+were right. v0.3 rebuilds it.
+
+**Per-turn re-entry (thanks, MCPulse).** The old `audit` billed each
+server's schemas once per session. That's wrong: the whole context —
+including every tool schema — is re-sent on *every* API call. A 30k-token
+schema in a 20-turn session isn't a 30k tax; it's a 600k tax that also has
+to fit in the window 20 times over. The ledger now bills per turn, and
+`--turns` scales the session total. The old once-per-session number is kept
+in the JSON output as `old_model_session_tokens` so you can see the
+undercount: it was the truth divided by your turn count.
+
+**Per-server preamble split.** Each server is now an independent billing
+line: its own preamble (tokens re-injected per turn), its own cumulative
+window tokens, its own billable tokens. Disable the most expensive
+preamble, watch the total move — that's the unit you actually decide on.
+
+**Per-page wire counter (thanks, Rudratosh Shastri).** `tools/list`
+pagination now reports **wire bytes per page** — a second, orthogonal
+dimension. Wire bytes are the transport cost of discovery, paid once per
+session; they are *not* context tax and they don't re-enter the window.
+A server can be wire-chatty (many small pages) yet schema-cheap, or the
+reverse. The audit shows both so you stop conflating them.
+
+**Prompt caching, honestly modeled.** Caching cuts the *price* of repeated
+tokens, not their *size in the window*. `--cache-hit-rate` discounts the
+billable column only; the window column never moves.
+
+## How billing works
 
 For each server, mcp-tax JSON-encodes the full `tools/list` result (compact,
-no whitespace) and counts characters. Estimated tokens = `round(chars / 4)`.
+no whitespace) and counts characters. Estimated tokens = `round(chars / 4)` —
+the Anthropic tokenizer's ~4-chars-per-token rule of thumb on English/JSON
+text. Deliberately crude: good enough to answer "which server is eating my
+window?", not a billing meter.
 
-This is deliberately crude: it approximates the Anthropic tokenizer's
-~4-chars-per-token rule of thumb on English/JSON text. Real token counts vary
-with the tokenizer and with how Claude Code wraps schemas, so treat the number
-as an order-of-magnitude gauge — good enough to answer "which server is eating
-my window?", not a billing meter.
+The v0.3 correction, in one paragraph: **schemas re-enter the window on
+every turn.** The number that matters per turn is the server's **preamble**
+(its schema tokens); the number that matters per session is preamble ×
+turns. Wire bytes (`tools/list` traffic, per-page) are measured separately
+because they're paid once per session and never touch the window again.
+Prompt cache hits make tokens cheaper but exactly as large — the ledger
+keeps `billable_tokens` and `cumulative_window_tokens` as separate columns
+for that reason.
+
+Thanks to dev.to readers **MCPulse** (per-turn re-entry) and **Rudratosh
+Shastri** (the wire-bytes-vs-context-tax split) for the discussions that
+shaped this model.
 
 ## Limitations
 
@@ -208,13 +260,17 @@ my window?", not a billing meter.
 - The estimate ignores tools' runtime behavior — a server with 2 tools can
   still be expensive if its tool *results* are huge. This tool measures schema
   cost only.
+- **The ledger needs a turn count.** `--turns` is your estimate of the
+  session's API calls; the cumulative columns scale linearly with it. When
+  in doubt, `who-called` on a past session tells you what your turn counts
+  actually look like.
 - `mcp-tax run` writes the filtered config to
   `~/.config/mcp-tax/mcp-config.filtered.json` (overwritten each run).
 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests   # 11 v2 tests (who-called, audit --all, gate)
+python3 -m unittest discover -s tests   # 25 tests: 11 v2 (who-called, audit --all, gate) + 14 v3 (wire counter, ledger, audit --turns)
 python3 tests/test_smoke.py             # 9 smoke tests, incl. a fake stdio MCP server
 ```
 
